@@ -37,7 +37,8 @@ ENEMY_MAP_SIZE = 64
 
 # Czcionki i Log
 FONT_SIZE = 16
-LOG_LINES = 15
+LOG_LINES = 10 # ZMNIEJSZONO LICZBĘ LINII LOGU, ABY ZMIEŚCIĆ GO NA GÓRZE
+MAIN_SECTION_Y_START = 250 # Stała Y, gdzie zaczyna się główna treść (pod logiem)
 
 try:
     FONT = pygame.font.Font(None, FONT_SIZE + 8)
@@ -48,19 +49,17 @@ except:
 
 # --- Ładowanie Grafiki (POPRAWIONA OBSŁUGA BŁĘDU) ---
 GRAPHICS_LOADED = False
-HERO_SPRITE = None
-ENEMY_SPRITE = None
+HERO_SPRITE_ORIGINAL = None 
+ENEMY_SPRITE_ORIGINAL = None 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__)) 
 
 try:
-    # Zakładam, że pliki hero.png i enemy.png są dostępne w katalogu ze skryptem
-    HERO_SPRITE = pygame.image.load(os.path.join(BASE_DIR, 'hero.png')).convert_alpha()
-    ENEMY_SPRITE = pygame.image.load(os.path.join(BASE_DIR, 'enemy.png')).convert_alpha()
-    HERO_SPRITE = pygame.transform.scale(HERO_SPRITE, (HERO_MAP_SIZE, HERO_MAP_SIZE)) 
-    ENEMY_SPRITE = pygame.transform.scale(ENEMY_SPRITE, (ENEMY_MAP_SIZE, ENEMY_MAP_SIZE)) 
+    HERO_SPRITE_ORIGINAL = pygame.image.load(os.path.join(BASE_DIR, 'hero.png')).convert_alpha()
+    ENEMY_SPRITE_ORIGINAL = pygame.image.load(os.path.join(BASE_DIR, 'enemy.png')).convert_alpha()
     GRAPHICS_LOADED = True
+    print("Ładowanie grafiki: Pomyślne.")
+    
 except pygame.error as e:
-    # Błąd ładowania (np. brak pliku)
     GRAPHICS_LOADED = False
     print(f"Błąd ładowania grafiki: {e}. Gra użyje kolorowych kwadratów.")
 
@@ -93,20 +92,18 @@ MAP_THEMES = {
 DEFAULT_THEME = MAP_THEMES["default"]
 
 
-# NOWY SYSTEM ATRIBUTÓW PODSTAWOWYCH (D&D)
-BASE_STATS = {'STR': 10, 'DEX': 10, 'CON': 10, 'INT': 10, 'WIS': 10, 'CHA': 10}
-
+# ZAKTUALIZOWANE UMIEJĘTNOŚCI DLA RÓŻNORODNOŚCI ATAKÓW
 HERO_CLASSES = {
     "Warrior": {'base_stats': {'STR': 14, 'DEX': 12, 'CON': 15, 'INT': 8, 'WIS': 10, 'CHA': 11}, 
-                'skills': ["Heavy Blow", "Block", "Shatter Defense", "Taunt"], 
+                'skills': ["Heavy Blow", "Block", "Shatter Defense", "Taunt", "Vampiric Strike", "Shield Bash", "Rage"], 
                 'equip': [{'name': 'Rusty Sword', 'type': 'weapon', 'value': 5, 'description': '+2 STR', 'equipable': True, 'stats': {'STR': 2}, 'slot': 'weapon'}, 
                           {'name': 'Leather Armor', 'type': 'armor', 'value': 10, 'description': '+1 CON', 'equipable': True, 'stats': {'CON': 1}, 'slot': 'armor'}]},
     "Mage": {'base_stats': {'STR': 8, 'DEX': 10, 'CON': 12, 'INT': 16, 'WIS': 14, 'CHA': 10}, 
-             'skills': ["Fireball", "Heal", "Arcane Missile", "Ice Shard", "Mana Shield"], 
+             'skills': ["Fireball", "Heal", "Arcane Missile", "Ice Shard", "Mana Shield", "Magic Storm", "Teleport"], 
              'equip': [{'name': 'Staff of Power', 'type': 'weapon', 'value': 20, 'description': '+3 INT', 'equipable': True, 'stats': {'INT': 3}, 'slot': 'weapon'}, 
                       {'name': 'Cloth Robe', 'type': 'armor', 'value': 5, 'description': '+1 WIS', 'equipable': True, 'stats': {'WIS': 1}, 'slot': 'armor'}]},
     "Rogue": {'base_stats': {'STR': 10, 'DEX': 16, 'CON': 13, 'INT': 10, 'WIS': 10, 'CHA': 11}, 
-              'skills': ["Sneak Attack", "Poison Edge", "Disarm", "Vanish"], 
+              'skills': ["Sneak Attack", "Poison Edge", "Disarm", "Vanish", "Blind", "Shadow Step", "Execute"], 
               'equip': [{'name': 'Dagger', 'type': 'weapon', 'value': 15, 'description': '+3 DEX', 'equipable': True, 'stats': {'DEX': 3}, 'slot': 'weapon'}, 
                       {'name': 'Leather Vest', 'type': 'armor', 'value': 15, 'description': '+1 DEX', 'equipable': True, 'stats': {'DEX': 1}, 'slot': 'armor'}]},
 }
@@ -140,14 +137,15 @@ class StatusEffect:
             dmg = self.value
             target.hp = max(0, target.hp - dmg)
             interface.add_to_log(f"|-- {target.name} cierpi na **Poison** i traci {dmg} HP. Pozostało: {target.hp}.")
-        elif self.name == "Stun":
-            interface.add_to_log(f"|-- {target.name} jest **Ogłuszony** i traci turę.")
-        elif self.name == "Defense Down": # NOWY
-            # Zmniejszenie AC jest już aktywne, tu tylko komunikat
+        elif self.name == "Stun" or self.name == "Blinded":
+            interface.add_to_log(f"|-- {target.name} jest **{self.name}** i traci turę/atak.")
+        elif self.name == "Defense Down": 
             interface.add_to_log(f"|-- **{target.name}** ma obniżoną obronę (-{self.value} AC).")
-        elif self.name == "Taunt": # NOWY
+        elif self.name == "Taunt": 
             interface.add_to_log(f"|-- **{target.name}** jest sprowokowany i atakuje tylko bohatera.")
-            
+        elif self.name == "Rage": # Buff
+             interface.add_to_log(f"|-- **{target.name}** jest w furii (+$2 STR).")
+             
         self.turns_left -= 1
 
     def to_dict(self):
@@ -248,7 +246,7 @@ class Shop:
                 hero.inventory.append(new_item)
                 interface.add_to_log(f"Kupiłeś **{new_item.name}** za {price} złota.")
                 return True
-            else: interface.add_to_log("Nie masz wystarczająco złota.")
+            else: interface.add_to_log("Nie masz wystarczająco złota!")
         return False
 
 class QuestBoard:
@@ -426,6 +424,9 @@ class Hero:
         self.mana = self.calculate_max_mana(); self.max_mana = self.calculate_max_mana()
         self.atk = self.calculate_atk(); self.defense = self.calculate_ac()
         
+        # Wskaźniki specyficzne dla walki
+        self.is_shadow_stepping = False # Flagga dla Shadow Step (Rogue)
+        
         # Wyposażenie startowe i przeliczenie statystyk
         for item_data in class_data["equip"]:
               item = Item(item_data['name'], item_data['type'], item_data['value'], item_data['description'], item_data['equipable'], item_data['stats'], item_data.get('slot'))
@@ -459,6 +460,8 @@ class Hero:
         ac_mod = 0
         if "Defense Down" in self.status_effects:
              ac_mod -= self.status_effects["Defense Down"].value # Obniżenie z debuffa
+        if "Mana Shield" in self.status_effects:
+             ac_mod += self.status_effects["Mana Shield"].value 
 
         return 10 + self.get_mod('DEX') + armor_bonus + ac_mod
 
@@ -476,13 +479,17 @@ class Hero:
         # Roll d20 + modyfikator ataku (STR lub DEX)
         hit_mod = self.get_mod('STR') if self.hero_class == "Warrior" else self.get_mod('DEX')
         roll_result, final_roll, log_message = roll_d20(hit_mod)
+        
+        # Gwarantowany krytyk po Shadow Step
+        if self.is_shadow_stepping:
+            roll_result = "CRIT"; log_message += " (Gwarantowany Krytyk po Shadow Step!)"
+            self.is_shadow_stepping = False
+            
         if self.interface: self.interface.add_to_log(log_message)
 
         # Upewnienie się, że defense jest przeliczone z uwzględnieniem efektów
         current_target_AC = target_AC 
-        if "Defense Down" in self.status_effects:
-             current_target_AC += self.status_effects["Defense Down"].value
-             
+        
         if final_roll < current_target_AC or roll_result == "MISS": return 0
         
         base_dmg = random.randint(1, 6) + hit_mod
@@ -491,14 +498,17 @@ class Hero:
         
         return max(1, int(final_dmg))
 
-    def use_skill(self, skill_name, target_enemy=None):
-        cost_map = {"Heavy Blow": 15, "Block": 10, "Shatter Defense": 20, "Taunt": 10, 
-                    "Fireball": 20, "Heal": 25, "Arcane Missile": 15, "Ice Shard": 15, "Mana Shield": 20,
-                    "Sneak Attack": 20, "Poison Edge": 15, "Disarm": 15, "Vanish": 20}
+    def use_skill(self, skill_name, target_enemy=None, target_list=None):
+        
+        # Wskaźnik many dla wszystkich nowych i starych umiejętności
+        cost_map = {"Heavy Blow": 15, "Block": 10, "Shatter Defense": 20, "Taunt": 10, "Vampiric Strike": 25, "Shield Bash": 20, "Rage": 30, # Warrior
+                    "Fireball": 20, "Heal": 25, "Arcane Missile": 15, "Ice Shard": 15, "Mana Shield": 20, "Magic Storm": 40, "Teleport": 30, # Mage
+                    "Sneak Attack": 20, "Poison Edge": 15, "Disarm": 15, "Vanish": 20, "Blind": 25, "Shadow Step": 35, "Execute": 40} # Rogue
+        
         cost = cost_map.get(skill_name, 0)
         
         if self.mana < cost: 
-            if self.interface: self.interface.add_to_log(f"Brak many na {skill_name} ({cost} MP)."); return 0, None, None # Zmieniona zwracana wartość
+            if self.interface: self.interface.add_to_log(f"Brak many na {skill_name} ({cost} MP)."); return 0, None, None # Dmg, Status, Efekt
         self.mana -= cost
         
         # --- ZDOLNOŚCI WSPARCIA I OBRONY ---
@@ -509,37 +519,81 @@ class Hero:
             if self.interface: self.interface.add_to_log(f"**Heal**: +{heal_amount} HP. ({self.hp}/{self.max_hp})"); return -1, None, None
         
         if skill_name == "Block":
-            # Tymczasowy status 'Block' (można to ulepszyć w logice walki)
             if self.interface: self.interface.add_to_log(f"**Block**: Zwiększasz obronę w tej turze!"); return -1, None, None
 
         if skill_name == "Mana Shield":
             self.apply_status(StatusEffect("Mana Shield", duration=2, value=10, is_debuff=False)) # np. +10 do AC przez 2 tury
             if self.interface: self.interface.add_to_log(f"**Mana Shield**: Tarcza absorbuje część obrażeń przez 2 tury!"); return -1, None, None
             
+        if skill_name == "Rage": # Buff dla Wojownika
+             self.apply_status(StatusEffect("Rage", duration=3, value=2, is_debuff=False)) # +2 do modyfikatora STR
+             if self.interface: self.interface.add_to_log(f"**Rage**: Wpadłeś w szał! Twoja siła wzrasta na 3 tury!");
+             self.attributes['STR'] += 2 # Natychmiastowa zmiana statystyki bazowej
+             self._update_derived_stats()
+             return -1, None, None
+             
         if skill_name == "Taunt":
              if target_enemy is None:
                  if self.interface: self.interface.add_to_log(f"Taunt wymaga celu! Komenda: skill taunt [nr]."); return 0, None, None
-             
              target_enemy.apply_status(StatusEffect("Taunt", duration=2, value=0))
              if self.interface: self.interface.add_to_log(f"**Taunt**: {target_enemy.name} jest sprowokowany na 2 tury!"); return -1, None, None
              
         if skill_name == "Vanish":
-            # Uproszczony Vanish - usuwa statusy aggro i ułatwia ucieczkę
-            if self.interface: self.interface.add_to_log(f"**Vanish**: Znikasz w cieniu, resetując aggro. Następna próba ucieczki ma +30% szansy."); return -1, "VANISH", None
-
+            if self.interface: self.interface.add_to_log(f"**Vanish**: Znikasz w cieniu, resetując aggro. Następna próba ucieczki ma +30% szansy."); 
+            return -1, "VANISH", None # Efekt VANISH (większa szansa na ucieczkę)
+            
+        if skill_name == "Teleport":
+            self.apply_status(StatusEffect("Teleporting", duration=1, is_debuff=False)) # Status uniemożliwiający trafienie w tej turze
+            if self.interface: self.interface.add_to_log(f"**Teleport**: Unikasz wszystkich ataków wroga w tej turze!");
+            return -1, "INVULNERABLE", None
+            
+        if skill_name == "Shadow Step":
+            self.is_shadow_stepping = True
+            if self.interface: self.interface.add_to_log(f"**Shadow Step**: Następny atak jest gwarantowanym krytykiem!");
+            return -1, None, None
+        
         # --- ZDOLNOŚCI ATAKUJĄCE/DEBUFFUJĄCE ---
-        if not target_enemy and skill_name not in ["Heal", "Block", "Mana Shield", "Vanish"]:
+        
+        # Magiczna Burza (Magic Storm) - atak obszarowy
+        if skill_name == "Magic Storm":
+             
+             if not target_list:
+                 if self.interface: self.interface.add_to_log("Magic Storm wymaga listy celów (do 3)."); return 0, None, None
+
+             hit_mod = self.get_mod('INT')
+             total_dmg = 0
+             
+             for i, enemy in enumerate(target_list[:3]):
+                 roll_result, final_roll, log_message = roll_d20(hit_mod - 2) # Lekkie obniżenie celności
+                 if self.interface: self.interface.add_to_log(f"[{enemy.name}] {log_message}")
+                 
+                 if final_roll >= enemy.get_current_AC() and roll_result != "MISS":
+                     base_dmg = (self.atk * 0.5) + self.get_mod('INT') * 2
+                     dmg = max(1, int(base_dmg))
+                     
+                     if roll_result == "CRIT": dmg *= 2
+                     
+                     enemy.take_damage(dmg)
+                     total_dmg += dmg
+                     if self.interface: self.interface.add_to_log(f"**Magic Storm** uderza {enemy.name} za {dmg} obrażeń.")
+                     
+             if total_dmg > 0: return -2, None, None # -2 oznacza atak obszarowy
+             else: return 0, None, None
+
+
+        if not target_enemy and skill_name not in ["Heal", "Block", "Mana Shield", "Vanish", "Teleport", "Rage", "Shadow Step"]:
             if self.interface: self.interface.add_to_log("Nie wybrano celu!"); return 0, None, None
 
-        target_AC = target_enemy.AC
+        target_AC = target_enemy.get_current_AC() # Pobranie AC z uwzględnieniem debuffów
         
         # Modyfikatory trafienia
-        if skill_name in ["Heavy Blow", "Shatter Defense", "Taunt"]: hit_mod = self.get_mod('STR') 
+        if skill_name in ["Heavy Blow", "Shatter Defense", "Taunt", "Vampiric Strike", "Shield Bash", "Rage"]: hit_mod = self.get_mod('STR') 
         elif skill_name in ["Fireball", "Arcane Missile", "Ice Shard", "Mana Shield"]: hit_mod = self.get_mod('INT') 
-        elif skill_name in ["Sneak Attack", "Poison Edge", "Disarm", "Vanish"]: hit_mod = self.get_mod('DEX')
+        elif skill_name in ["Sneak Attack", "Poison Edge", "Disarm", "Vanish", "Blind", "Shadow Step", "Execute"]: hit_mod = self.get_mod('DEX')
         else: hit_mod = self.get_mod('STR')
 
         roll_result, final_roll, log_message = roll_d20(hit_mod)
+        
         if self.interface: self.interface.add_to_log(log_message)
 
         if final_roll < target_AC or roll_result == "MISS": return 0, None, None
@@ -547,12 +601,19 @@ class Hero:
         # Obrażenia Umiejętności
         base_dmg = 0
         status_to_apply = None
+        additional_effect = None
 
         if skill_name == "Heavy Blow":
             base_dmg = (self.atk * 1.5) + self.get_mod('STR') * 3
         elif skill_name == "Shatter Defense":
             base_dmg = (self.atk * 1.0) + self.get_mod('STR') * 2
             status_to_apply = StatusEffect("Defense Down", duration=3, value=3)
+        elif skill_name == "Vampiric Strike":
+             base_dmg = (self.atk * 1.2) + self.get_mod('STR') * 3
+             additional_effect = "HEAL_DMG_PERCENT_50" # Uleczenie za 50% obrażeń
+        elif skill_name == "Shield Bash":
+             base_dmg = (self.atk * 0.8) + self.get_mod('CON') * 2
+             if random.random() > 0.6: status_to_apply = StatusEffect("Stun", duration=1)
         
         elif skill_name == "Fireball":
             base_dmg = (self.atk * 0.5) + self.get_mod('INT') * 5
@@ -561,7 +622,7 @@ class Hero:
         elif skill_name == "Ice Shard":
              base_dmg = (self.atk * 0.7) + self.get_mod('INT') * 4
              if random.random() > 0.7:
-                 status_to_apply = StatusEffect("Stun", duration=1) # Szansa na Stun/Frozen
+                 status_to_apply = StatusEffect("Stun", duration=1) 
                  
         elif skill_name == "Sneak Attack":
             base_dmg = (self.atk * 2.0) + self.get_mod('DEX') * 4
@@ -571,11 +632,24 @@ class Hero:
         elif skill_name == "Disarm":
             base_dmg = (self.atk * 0.5) + self.get_mod('DEX') * 2
             if random.random() > 0.5:
-                status_to_apply = StatusEffect("Disarmed", duration=1) # Nowy status (wrogowie muszą go obsługiwać)
+                status_to_apply = StatusEffect("Disarmed", duration=1) 
+        elif skill_name == "Blind":
+            base_dmg = (self.atk * 0.1) + self.get_mod('DEX') * 1
+            if random.random() > 0.6:
+                status_to_apply = StatusEffect("Blinded", duration=2) 
+        elif skill_name == "Execute":
+             # Wymaga, aby HP wroga było niskie (np. poniżej 20%)
+             if target_enemy.hp / target_enemy.max_hp < 0.2:
+                 base_dmg = target_enemy.hp + 1 # Gwarantowany kill
+                 if self.interface: self.interface.add_to_log(f"**Execute**: Śmiertelny Cios!");
+             else:
+                 base_dmg = (self.atk * 1.5) + self.get_mod('DEX') * 5
+                 if self.interface: self.interface.add_to_log(f"**Execute**: Wróg ma zbyt dużo HP, by go wykończyć. Zwykłe uderzenie.");
+
 
         final_dmg = base_dmg * 2 if roll_result == "CRIT" else base_dmg
         
-        return max(1, int(final_dmg)), status_to_apply, None # Dmg, Status, Dodatkowy efekt
+        return max(1, int(final_dmg)), status_to_apply, additional_effect # Dmg, Status, Dodatkowy efekt
         
     def equip_item(self, item, start_equip=False):
         if not item.equipable or not item.slot: return False
@@ -609,7 +683,20 @@ class Hero:
         self.hp = self.max_hp; self.mana = self.max_mana
         # Usuwanie debuffów przy odpoczynku
         self.status_effects = {k: v for k, v in self.status_effects.items() if not v.is_debuff}
+        
+        # Usunięcie buffa Rage (jeśli jest)
+        if "Rage" in self.status_effects:
+             self._remove_rage_buff()
+             
         if self.interface: self.interface.add_to_log("Odpocząłeś całkowicie. HP i Mana przywrócone.")
+        
+    def _remove_rage_buff(self):
+         if "Rage" in self.status_effects:
+              rage_value = self.status_effects["Rage"].value
+              self.attributes['STR'] -= rage_value
+              del self.status_effects["Rage"]
+              self._update_derived_stats()
+              if self.interface: self.interface.add_to_log("Status Furia minął (STR wróciło do normy).")
         
     def gain(self, gold=0, exp=0): 
         self.gold += gold; self.exp += exp; self.level_up()
@@ -643,6 +730,11 @@ class Hero:
         
     def take_damage(self, dmg): 
         
+        # Teleporting (Unikanie)
+        if "Teleporting" in self.status_effects:
+            if self.interface: self.interface.add_to_log(f"**Teleport**: Bohater uniknął ataku, teleportując się!")
+            return 0
+        
         # Ochrona przed Mana Shield
         if "Mana Shield" in self.status_effects:
              shield_value = self.status_effects["Mana Shield"].value
@@ -665,8 +757,19 @@ class Hero:
     def is_alive(self): return self.hp > 0
 
     def apply_status(self, effect):
-        if effect.name == "Defense Down": # Debuffy na bohaterze
-             # Musimy usunąć stary efekt przed dodaniem nowego, aby zaktualizować AC
+        # Specjalne obsługa buffa Rage
+        if effect.name == "Rage":
+             if effect.name in self.status_effects: # Resetuje czas trwania
+                 self.status_effects[effect.name].turns_left = effect.duration
+                 return
+             
+             self.status_effects[effect.name] = effect
+             # Zmiana STR jest już w use_skill/Rage, tutaj tylko komunikat
+             if self.interface: self.interface.add_to_log(f"Bohater został dotknięty statusem **{effect.name}**!")
+             return
+             
+        # Specjalne obsługa debuffów na bohaterze
+        if effect.name == "Defense Down": 
              if effect.name in self.status_effects: del self.status_effects[effect.name]
              self.status_effects[effect.name] = effect
              self._update_derived_stats()
@@ -678,22 +781,37 @@ class Hero:
              if self.interface: self.interface.add_to_log(f"Bohater został dotknięty statusem **{effect.name}**!")
     
     def process_status_effects(self, interface):
-        # Usuń efekty obronne przed przetwarzaniem, aby zaktualizować AC poprawnie
+        
+        # Sprawdzanie i usuwanie Rage (Buff)
+        if "Rage" in self.status_effects:
+             effect = self.status_effects["Rage"]
+             effect.apply_effect(self, interface)
+             if effect.turns_left <= 0:
+                 self._remove_rage_buff()
+                 
+        # Sprawdzanie i usuwanie Defense Down
         if "Defense Down" in self.status_effects:
-             # Tymczasowo usuwamy, aby AC wróciło do normy jeśli efekt mija
              effect = self.status_effects["Defense Down"]
              effect.turns_left -= 1
              if effect.turns_left <= 0:
                  del self.status_effects["Defense Down"]
                  interface.add_to_log(f"Status **Defense Down** minął.")
-                 self._update_derived_stats() # Aktualizacja AC po ustąpieniu Defense Down
+                 self._update_derived_stats() 
              else:
                   interface.add_to_log(f"|-- Bohater ma obniżoną obronę. Pozostało: {effect.turns_left} tur.")
+                  
+        # Sprawdzanie i usuwanie Teleporting
+        if "Teleporting" in self.status_effects:
+            effect = self.status_effects["Teleporting"]
+            effect.turns_left -= 1
+            if effect.turns_left <= 0:
+                del self.status_effects["Teleporting"]
+                interface.add_to_log(f"Status **Teleporting** minął.")
 
 
         active_effects = list(self.status_effects.keys())
         for name in active_effects:
-            if name == "Defense Down": continue # Już obsłużony
+            if name in ["Defense Down", "Rage", "Teleporting"]: continue # Już obsłużone
             effect = self.status_effects[name]
             
             # Wpływ na postać gracza (np. Poison)
@@ -718,6 +836,7 @@ class Hero:
             'gold': self.gold, 'exp': self.exp,
             'level': self.level, 'skills': self.skills, 
             'attribute_points': self.attribute_points, 
+            'is_shadow_stepping': self.is_shadow_stepping, # Dodanie flagi
             'status_effects': {k: v.to_dict() for k, v in self.status_effects.items()},
             'inventory': [item.to_dict() for item in self.inventory],
             'equipped_weapon': self.equipped_weapon.to_dict() if self.equipped_weapon else None,
@@ -755,6 +874,14 @@ class Enemy:
                   self.process_status_effects(self.interface)
                   self.interface.add_to_log(f"[{self.name}] jest Rozbrojony i traci atak!")
                   return 0
+        
+        # Sprawdzenie i przetwarzanie Blinds
+        if "Blinded" in self.status_effects:
+             if random.random() < 0.5: # 50% szansy na pudło
+                  self.process_status_effects(self.interface)
+                  self.interface.add_to_log(f"[{self.name}] jest Oślepiony i **spudłował!**")
+                  return 0
+
 
             
         hit_modifier = self.get_mod(self.atk)
@@ -841,25 +968,47 @@ class GameInterface:
         
         hero.interface = self # Ustawienie referencji zwrotnej
         
+        # --- FIX: Inicjalizacja QuestBoard ---
+        self.quest_board = QuestBoard() 
+        # --- END FIX ---
+        
         self.add_to_log(f"Witaj, {hero.name} ({hero.hero_class})! Wpisz 'help' aby zobaczyć komendy.")
         self.add_to_log(f"Jesteś na pozycji: {world.hero_position}. Czekają Cię przygody w świecie **{world.theme_name.upper()}**!")
 
     def add_to_log(self, message):
-        timestamp = time.strftime("[%H:%M:%S]", time.localtime())
-        self.log.append(f"{timestamp} {message}")
-        if len(self.log) > LOG_LINES:
-            self.log = self.log[-LOG_LINES:]
-            
+        # Rozbicie długich wiadomości na krótsze linie dla lepszego wyświetlania
+        MAX_LINE_LENGTH = 80
+        parts = message.split()
+        current_line = ""
+        
+        for part in parts:
+            if len(current_line) + len(part) + 1 > MAX_LINE_LENGTH:
+                self.log.append(current_line)
+                current_line = part
+            else:
+                current_line = (current_line + " " + part).strip()
+        
+        if current_line: self.log.append(current_line)
+        if len(self.log) > LOG_LINES: self.log = self.log[-LOG_LINES:]
+        
     def set_game_state(self, new_state):
         self.game_state = new_state
         if new_state == "COMBAT":
             self.add_to_log("\n*** ROZPOCZĘTO WALKĘ! ***")
-            self.add_to_log("Wpisz 'attack [numer wroga]' lub 'skill [nazwa] [numer wroga]'. Wpisz 'skills' aby zobaczyć listę.")
+            # Logika wyświetlania opcji jest teraz w 'draw_combat_info'
         elif new_state == "TOWN":
             self.add_to_log("\n*** WEJŚCIE DO MIASTA ***")
-            self.add_to_log("Dostępne komendy: 'shop', 'board', 'rest', 'exit'.")
+            self.add_to_log("Dostępne komendy: 'shop', 'board', 'rest', 'exit' (lub klawisz P dla sklepu).")
         elif new_state == "STAT_ALLOCATION":
             self.add_to_log(f"\nMasz {self.hero.attribute_points} punktów do przydzielenia. Komenda: 'allocate STR/DEX/etc.'")
+        # --- Usprawnienie: Wyświetl listę od razu po wejściu do trybu ---
+        elif new_state == "TOWN_SHOP":
+            self.add_to_log("\n*** SKLEP ***")
+            self.quest_board.shop_instance.display_items(self.hero, self)
+        elif new_state == "TOWN_BOARD":
+             self.add_to_log("\n*** TABLICA OGŁOSZEŃ ***")
+             self.quest_board.display_board(self.hero, self)
+        # --- Koniec Usprawnienia ---
             
     def start_combat(self, enemies):
         if self.game_state != "COMBAT":
@@ -867,15 +1016,12 @@ class GameInterface:
             self.set_game_state("COMBAT")
             
     def end_combat(self):
-        self.add_to_log("\n*** KONIEC WALKI! ***")
+        self.add_to_log("\n*** KONIEC WALK! ***")
+        
+        quests_to_remove = [] 
         for enemy in self.current_enemies:
             if not enemy.is_alive():
                 self.hero.gain(enemy.gold, enemy.exp)
-                # Sprawdzenie warunku głównego zadania (jeśli WIN, stan gry jest zmieniany)
-                self.hero.current_quests = [q for q in self.hero.current_quests if q.give_reward(self.hero, self) != "WIN"]
-                
-                if self.game_state == "WIN": return # Gra się kończy
-                
                 self.add_to_log(f"Zwycięstwo! Zdobyto {enemy.gold} złota i {enemy.exp} EXP.")
                 
                 # Aktualizacja zadań
@@ -886,6 +1032,18 @@ class GameInterface:
                          q.update_progress(interface=self)
                     elif q.type == "defeat_boss" and enemy.is_boss:
                         q.update_progress(interface=self)
+                        
+        # Sprawdzenie warunku głównego zadania (po wszystkich walkach)
+        for q in list(self.hero.current_quests):
+            if q.completed:
+                result = q.give_reward(self.hero, self)
+                if result == "WIN": 
+                    self.set_game_state("WIN") 
+                    return
+                if result: 
+                    # Zadanie odebrane w end_combat (nie powinno się tak dziać, ale zabezpieczamy)
+                    if q in self.hero.current_quests:
+                         self.hero.current_quests.remove(q)
                         
         self.current_enemies = []
         self.set_game_state("EXPLORATION")
@@ -906,7 +1064,10 @@ class GameInterface:
     def draw_text(self, surface, text, pos, color=WHITE, align_right=False):
         lines = text.split('\n')
         for i, line in enumerate(lines):
-            text_surface = FONT.render(line, True, color)
+            # Uproszczenie: Usuwanie tagów formatowania przed renderowaniem
+            line_cleaned = line.replace("**", "").replace("`", "")
+            
+            text_surface = FONT.render(line_cleaned, True, color)
             rect = text_surface.get_rect()
             
             x = pos[0]
@@ -928,25 +1089,25 @@ class GameInterface:
         pygame.draw.rect(surface, WHITE, (*pos, width, height), 1)
         
         # Tekst na pasku
-        text = f"{current_val}/{max_val}"
+        text = f"{int(current_val)}/{int(max_val)}"
         text_surface = FONT.render(text, True, text_color)
         text_rect = text_surface.get_rect(center=(pos[0] + width // 2, pos[1] + height // 2))
         surface.blit(text_surface, text_rect)
         
-    def draw_combat_info(self):
+    def draw_combat_info(self, start_y): # ZMIANA: Przyjmuje start_y
         offset_x = 20
-        offset_y = 40
+        offset_y = start_y # Użycie start_y
         
-        # NOWE, WIĘKSZE ROZMIARY DLA EKRANU WALKI
         COMBAT_HERO_SIZE = 96 
         COMBAT_ENEMY_SIZE = 64
         
         # Rysowanie bohatera
         hero_x = SCREEN_WIDTH // 2 - 100
-        hero_y = SCREEN_HEIGHT * 0.7 - COMBAT_HERO_SIZE
+        # Pozycja Y bohatera jest teraz względna do start_y i dołu ekranu
+        hero_y = start_y + (SCREEN_HEIGHT - 45 - start_y) * 0.6 - COMBAT_HERO_SIZE
         
-        if GRAPHICS_LOADED:
-            scaled_hero_sprite = pygame.transform.scale(HERO_SPRITE, (COMBAT_HERO_SIZE, COMBAT_HERO_SIZE))
+        if GRAPHICS_LOADED and HERO_SPRITE_ORIGINAL:
+            scaled_hero_sprite = pygame.transform.scale(HERO_SPRITE_ORIGINAL, (COMBAT_HERO_SIZE, COMBAT_HERO_SIZE))
             SCREEN.blit(scaled_hero_sprite, (hero_x, hero_y))
         else:
             pygame.draw.rect(SCREEN, HERO_COLOR, (hero_x, hero_y, COMBAT_HERO_SIZE, COMBAT_HERO_SIZE))
@@ -959,18 +1120,25 @@ class GameInterface:
         self.draw_text(SCREEN, "HP", (hero_x - 120, hero_y + COMBAT_HERO_SIZE + 10), WHITE)
         self.draw_bar(SCREEN, (hero_x - 100, hero_y + COMBAT_HERO_SIZE + 35), self.hero.mana, self.hero.max_mana, BLUE, width=200, height=20)
         self.draw_text(SCREEN, "MP", (hero_x - 120, hero_y + COMBAT_HERO_SIZE + 35), WHITE)
+        
+        # Aktywne statusy bohatera
+        hero_status_text = ""
+        for name, effect in self.hero.status_effects.items():
+            if name not in ["Defense Down", "Rage", "Teleporting"]: 
+                 hero_status_text += f"**{name}** ({effect.turns_left}) "
+        if hero_status_text:
+             self.draw_text(SCREEN, f"Statusy: {hero_status_text}", (hero_x - 100, hero_y + COMBAT_HERO_SIZE + 60), LIGHT_GREY)
+
 
         # Rysowanie wrogów
-        for i, enemy in enumerate(self.current_enemies):
+        alive_enemies = [e for e in self.current_enemies if e.is_alive()]
+        
+        for i, enemy in enumerate(alive_enemies):
             enemy_x = offset_x + i * 200
-            enemy_y = offset_y + 100
+            enemy_y = offset_y + 20 # Przesunięcie w dół od start_y
             
-            # Wskaźnik celu
-            if self.selected_skill and self.selected_skill[1] == i + 1:
-                pygame.draw.circle(SCREEN, (255, 0, 0), (enemy_x + COMBAT_ENEMY_SIZE // 2, enemy_y - 20), 10, 2)
-            
-            if GRAPHICS_LOADED:
-                scaled_enemy_sprite = pygame.transform.scale(ENEMY_SPRITE, (COMBAT_ENEMY_SIZE, COMBAT_ENEMY_SIZE))
+            if GRAPHICS_LOADED and ENEMY_SPRITE_ORIGINAL:
+                scaled_enemy_sprite = pygame.transform.scale(ENEMY_SPRITE_ORIGINAL, (COMBAT_ENEMY_SIZE, COMBAT_ENEMY_SIZE))
                 SCREEN.blit(scaled_enemy_sprite, (enemy_x, enemy_y))
             else:
                 pygame.draw.rect(SCREEN, ENEMY_COLOR, (enemy_x, enemy_y, COMBAT_ENEMY_SIZE, COMBAT_ENEMY_SIZE))
@@ -984,16 +1152,18 @@ class GameInterface:
             info += f"AC: {enemy.get_current_AC()}\n"
             
             # Statusy
+            enemy_status_text = ""
             for name, effect in enemy.status_effects.items():
-                color = POISON_COLOR if name == "Poison" else STUN_COLOR if name in ["Stun", "Disarmed"] else (0, 200, 200)
-                info += f"**{name}** ({effect.turns_left}) "
+                enemy_status_text += f"**{name}** ({effect.turns_left}) "
+                
+            info += enemy_status_text
                 
             self.draw_text(SCREEN, info, (enemy_x + COMBAT_ENEMY_SIZE + 10, enemy_y), WHITE)
             
-        # --- LISTA DOSTĘPNYCH AKCJI W WALCE ---
-        cost_map = {"Heavy Blow": 15, "Block": 10, "Shatter Defense": 20, "Taunt": 10, 
-                    "Fireball": 20, "Heal": 25, "Arcane Missile": 15, "Ice Shard": 15, "Mana Shield": 20,
-                    "Sneak Attack": 20, "Poison Edge": 15, "Disarm": 15, "Vanish": 20}
+        # --- LISTA DOSTĘPNYCH AKCJI W WALCE (zaktualizowana) ---
+        cost_map = {"Heavy Blow": 15, "Block": 10, "Shatter Defense": 20, "Taunt": 10, "Vampiric Strike": 25, "Shield Bash": 20, "Rage": 30, 
+                    "Fireball": 20, "Heal": 25, "Arcane Missile": 15, "Ice Shard": 15, "Mana Shield": 20, "Magic Storm": 40, "Teleport": 30, 
+                    "Sneak Attack": 20, "Poison Edge": 15, "Disarm": 15, "Vanish": 20, "Blind": 25, "Shadow Step": 35, "Execute": 40}
         
         actions_text = "*** TWOJE AKCJE ***\n"
         actions_text += f"**Atak Podstawowy**\n  Komenda: `attack [nr]`\n"
@@ -1002,11 +1172,10 @@ class GameInterface:
         
         for skill in self.hero.skills:
              cost = cost_map.get(skill, 0)
-             # Ulepszony opis komend na ekranie
-             if skill in ["Heal", "Block", "Mana Shield", "Vanish"]:
+             if skill in ["Heal", "Block", "Mana Shield", "Vanish", "Rage", "Shadow Step", "Teleport"]:
                  target_info = ""
-             elif skill in ["Taunt"]:
-                 target_info = " [nr]"
+             elif skill == "Magic Storm":
+                 target_info = " [nr1,nr2,...]"
              else:
                  target_info = " [nr]"
              
@@ -1015,17 +1184,26 @@ class GameInterface:
         actions_text += "------------------------\n"
         actions_text += "Użyj **flee** aby spróbować uciec."
         
-        # Pozycja rysowania akcji (na prawo od bohatera)
+        # Pozycja rysowania akcji
         actions_x = SCREEN_WIDTH // 2 + 120
-        actions_y = SCREEN_HEIGHT * 0.7 - COMBAT_HERO_SIZE 
+        actions_y = start_y + 20 # Przesunięcie w dół od start_y
         self.draw_text(SCREEN, actions_text, (actions_x, actions_y), WHITE)
             
 
-    def draw_map(self):
-        MAP_DRAW_SIZE = min(SCREEN_WIDTH - 20, SCREEN_HEIGHT - 250)
-        CELL_SIZE = MAP_DRAW_SIZE // self.world.size
-        MAP_START_X = (SCREEN_WIDTH - MAP_DRAW_SIZE) // 2
-        MAP_START_Y = (SCREEN_HEIGHT - 250 - MAP_DRAW_SIZE) // 2
+    def draw_map(self, start_y): # ZMIANA: Przyjmuje start_y
+        # Obliczenie rozmiaru mapy, aby zmieściła się w pozostałym miejscu
+        MAP_HEIGHT = (SCREEN_HEIGHT - 45) - start_y - 10 # Wysokość od start_y do paska input
+        MAP_WIDTH = SCREEN_WIDTH - 20
+        
+        CELL_SIZE_H = MAP_HEIGHT // self.world.size
+        CELL_SIZE_W = MAP_WIDTH // self.world.size
+        CELL_SIZE = min(CELL_SIZE_H, CELL_SIZE_W, 40) # Ograniczenie max rozmiaru
+        
+        MAP_DRAW_SIZE_X = CELL_SIZE * self.world.size
+        MAP_DRAW_SIZE_Y = CELL_SIZE * self.world.size
+        
+        MAP_START_X = (SCREEN_WIDTH - MAP_DRAW_SIZE_X) // 2
+        MAP_START_Y = start_y + (MAP_HEIGHT - MAP_DRAW_SIZE_Y) // 2 # Centrowanie pionowe
         
         
         for x in range(self.world.size):
@@ -1041,11 +1219,17 @@ class GameInterface:
                 
                 # Rysowanie bohatera
                 if (x, y) == self.world.hero_position:
-                    hero_rect = pygame.Rect(rect.centerx - CELL_SIZE // 4, rect.centery - CELL_SIZE // 4, CELL_SIZE // 2, CELL_SIZE // 2)
-                    pygame.draw.rect(SCREEN, HERO_COLOR, hero_rect)
+                    if GRAPHICS_LOADED and HERO_SPRITE_ORIGINAL:
+                        # Skalowanie oryginału do rozmiaru komórki mapy
+                        hero_sprite_scaled = pygame.transform.scale(HERO_SPRITE_ORIGINAL, (CELL_SIZE - 5, CELL_SIZE - 5))
+                        SCREEN.blit(hero_sprite_scaled, (rect.x + (CELL_SIZE - hero_sprite_scaled.get_width()) // 2, rect.y + (CELL_SIZE - hero_sprite_scaled.get_height()) // 2))
+                    else:
+                        hero_rect = pygame.Rect(rect.centerx - CELL_SIZE // 4, rect.centery - CELL_SIZE // 4, CELL_SIZE // 2, CELL_SIZE // 2)
+                        pygame.draw.rect(SCREEN, HERO_COLOR, hero_rect)
+
 
         # Rysowanie legendy
-        legend_start_y = MAP_START_Y + MAP_DRAW_SIZE + 20
+        legend_start_y = MAP_START_Y + MAP_DRAW_SIZE_Y + 10
         self.draw_text(SCREEN, f"Legenda (Motyw: {self.world.theme_name.upper()}):", (MAP_START_X, legend_start_y))
         
         for i, (key, data) in enumerate(self.world.theme_data.items()):
@@ -1053,14 +1237,15 @@ class GameInterface:
             color = data["color"]
             name = data["name"]
             
-            legend_x = MAP_START_X + (i % 3) * (MAP_DRAW_SIZE // 3)
+            legend_x = MAP_START_X + (i % 3) * (MAP_DRAW_SIZE_X // 3)
             legend_y = legend_start_y + 30 + (i // 3) * 20
             
-            pygame.draw.circle(SCREEN, color, (legend_x + 5, legend_y + 8), 6)
-            self.draw_text(SCREEN, f"- {name}", (legend_x + 15, legend_y))
+            if legend_y < (SCREEN_HEIGHT - 50): # Upewnij się, że legenda nie nachodzi na input
+                pygame.draw.circle(SCREEN, color, (legend_x + 5, legend_y + 8), 6)
+                self.draw_text(SCREEN, f"- {name}", (legend_x + 15, legend_y))
 
 
-    def draw_stats(self):
+    def draw_stats(self, start_y): # ZMIANA: Przyjmuje start_y
         stats_text = f"*** STATYSTYKI BOHATERA ({self.hero.name}, Lvl {self.hero.level}) ***\n"
         stats_text += f"Klasa: {self.hero.hero_class}\n"
         stats_text += f"HP: {self.hero.hp}/{self.hero.max_hp} | Mana: {self.hero.mana}/{self.hero.max_mana}\n"
@@ -1076,6 +1261,10 @@ class GameInterface:
         
         stats_text += "---------------------------------------\n"
         
+        # Wyświetlanie aktywnego buffa Rage
+        if "Rage" in self.hero.status_effects:
+             stats_text += f"**Aktywny Buff**: Furia (+2 STR, {self.hero.status_effects['Rage'].turns_left} tury)\n"
+        
         # Wyświetlanie ekwipunku
         stats_text += "\n*** EKWIPUNEK ***\n"
         stats_text += f"Broń (Weapon): {self.hero.equipped_weapon.name if self.hero.equipped_weapon else 'Brak'}\n"
@@ -1090,10 +1279,10 @@ class GameInterface:
                  status = "✅ Ukończone!" if q.completed else f"W toku: {q.progress}/{q.target}"
                  stats_text += f"- **{q.name}**: {status}\n"
         
-        self.draw_text(SCREEN, stats_text, (20, 20), WHITE)
+        self.draw_text(SCREEN, stats_text, (20, start_y), WHITE)
 
 
-    def draw_inventory(self):
+    def draw_inventory(self, start_y): # ZMIANA: Przyjmuje start_y
         inventory_text = f"*** INWENTARZ (Złoto: {self.hero.gold}) ***\n"
         inventory_text += "Wpisz 'use [numer]' (mikstury) lub 'equip [numer]' (sprzęt).\n"
         
@@ -1101,54 +1290,110 @@ class GameInterface:
             equip_info = f" [Wyposażalny, Slot: {item.slot}]" if item.equipable else ""
             inventory_text += f"[{i+1}] **{item.name}** ({item.type}, {item.value} złota): {item.description} {equip_info}\n"
             
-        self.draw_text(SCREEN, inventory_text, (20, 20), WHITE)
+        self.draw_text(SCREEN, inventory_text, (20, start_y), WHITE)
 
     
     def draw(self):
         SCREEN.fill(DARK_GREY)
 
-        # 1. Rysowanie sekcji głównej
-        main_section_rect = pygame.Rect(10, 10, SCREEN_WIDTH - 20, SCREEN_HEIGHT - 160)
-        pygame.draw.rect(SCREEN, BLACK, main_section_rect)
-        pygame.draw.rect(SCREEN, LIGHT_GREY, main_section_rect, 1)
+        # 1. Rysowanie Paska Statystyk (GÓRA)
+        stats_text = f"HP: {self.hero.hp}/{self.hero.max_hp} | MANA: {self.hero.mana}/{self.hero.max_mana} | ATK: {int(self.hero.atk)} | AC: {self.hero.defense} | GOLD: {self.hero.gold} | LVL: {self.hero.level} | MAPA: {self.world.theme_name.upper()}"
+        stats_surface = FONT.render(stats_text, True, WHITE)
+        SCREEN.blit(stats_surface, (10, 10))
 
+        # 2. Rysowanie Loga (NOWA POZYCJA: POD PASKIEM STATYSTYK)
+        log_start_y = 40 
+        log_height = (LOG_LINES * (FONT_SIZE + 2)) + 10 # 10 linii * 18px + 10 padding = 190px
+        pygame.draw.rect(SCREEN, (10, 10, 10), (10, log_start_y, SCREEN_WIDTH - 20, log_height))
+        
+        for i, line in enumerate(self.log[-LOG_LINES:]):
+             color = LIGHT_GREY
+             if "ZWYCIĘSTWO" in line: color = GREEN
+             elif "PORAŻKA" in line or "BŁĄD" in line: color = RED
+             elif "BOSS" in line: color = RED
+             elif "Poison" in line: color = POISON_COLOR
+             elif "Stun" in line: color = STUN_COLOR
+             elif "Frozen" in line: color = SNOW_COLOR 
+             elif "Zapisana" in line or "Wczytana" in line or "Motyw" in line or "UWAGA" in line: color = HERO_COLOR
+             
+             display_line = line.replace('**', '').replace('`', '')
+             
+             text_surface = FONT.render(display_line, True, color)
+             SCREEN.blit(text_surface, (15, log_start_y + 5 + (i * (FONT_SIZE + 2))))
+            
+        # 3. Rysowanie Głównej Sekcji (NOWA POZYCJA: POD LOGIEM)
+        MAIN_SECTION_Y_START = log_start_y + log_height + 10 # Np. 40 + 190 + 10 = 240
+        
         # Wyświetlanie stanu gry
         if self.game_state == "START_MENU":
-            self.draw_start_menu()
+            self.draw_start_menu() # Ten jest pełnoekranowy
         elif self.game_state == "WIN":
-            self.draw_win_screen()
+            self.draw_win_screen() # Ten jest pełnoekranowy
         elif self.game_state == "COMBAT":
-            self.draw_combat_info()
+            self.draw_combat_info(MAIN_SECTION_Y_START) 
         elif self.game_state == "EXPLORATION" or self.game_state == "TOWN" or self.game_state == "TOWN_SHOP" or self.game_state == "TOWN_BOARD":
-            self.draw_map()
+            self.draw_map(MAIN_SECTION_Y_START) 
         elif self.game_state in ["STATS", "STAT_ALLOCATION"]:
-            self.draw_stats()
+            self.draw_stats(MAIN_SECTION_Y_START) 
         elif self.game_state == "INVENTORY":
-            self.draw_inventory()
+            self.draw_inventory(MAIN_SECTION_Y_START) 
             
-        if self.game_state == "TOWN_SHOP":
-            Shop().display_items(self.hero, self) # Shop ma własny log
-        elif self.game_state == "TOWN_BOARD":
-             QuestBoard().display_board(self.hero, self) # Board ma własny log
+        # UWAGA: Wyświetlanie listy sklepu/zadań odbywa się poprzez logi w set_game_state/handle_command, 
+        # a nie w pętli draw, aby uniknąć spamowania logu.
 
-
-        # 2. Rysowanie logu
-        log_start_y = SCREEN_HEIGHT - 150
-        pygame.draw.rect(SCREEN, (10, 10, 10), (10, log_start_y, SCREEN_WIDTH - 20, 100))
-        
-        log_text = "\n".join(self.log)
-        self.draw_text(SCREEN, log_text, (15, log_start_y + 5), LIGHT_GREY)
-
-        # 3. Rysowanie pola wprowadzania
+        # 4. Rysowanie Paska Wprowadzania (DÓŁ)
         input_rect = pygame.Rect(10, SCREEN_HEIGHT - 45, SCREEN_WIDTH - 20, 35)
         pygame.draw.rect(SCREEN, WHITE, input_rect)
         
         input_surface = INPUT_FONT.render("> " + self.input_text, True, BLACK)
         SCREEN.blit(input_surface, (input_rect.x + 5, input_rect.y + 5))
         
+        
+        # 5. Overlays (STAT_ALLOCATION, GAME_OVER)
+        if self.game_state == "STAT_ALLOCATION":
+            overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+            overlay.fill((0, 0, 0, 200))
+            SCREEN.blit(overlay, (0, 0))
+            
+            self.draw_stat_allocation_overlay(SCREEN, FONT, WHITE, self.hero)
+
+        if self.game_state == "GAME_OVER":
+            overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+            overlay.fill((0, 0, 0, 200)) 
+            SCREEN.blit(overlay, (0, 0))
+            
+            go_text = FONT.render("KONIEC GRY", True, RED)
+            go_rect = go_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2))
+            SCREEN.blit(go_text, go_rect)
+            
+            exit_text = FONT.render("Wpisz 'exit' w konsoli i zatwierdź [Enter]", True, WHITE)
+            exit_rect = exit_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 30))
+            SCREEN.blit(exit_text, exit_rect)
+            
         pygame.display.flip()
 
-    # --- Metody obsługi komend ---
+    # Rysowanie nakładki alokacji statystyk
+    def draw_stat_allocation_overlay(self, surface, font, color, hero):
+        title = font.render("PRZYDZIEL PUNKTY ATRYBUTÓW", True, HERO_COLOR)
+        surface.blit(title, (50, 50))
+        
+        points_left = font.render(f"PUNKTY DO PRZYDZIELENIA: {hero.attribute_points}", True, color)
+        surface.blit(points_left, (50, 80))
+        
+        y_pos = 120
+        for stat, value in hero.attributes.items():
+            mod = hero.get_mod(stat)
+            text = font.render(f"{stat}: {value} (Mod: {mod})", True, color)
+            surface.blit(text, (50, y_pos))
+            y_pos += FONT_SIZE + 5
+            
+        help_text = font.render("Użyj komendy: allocate [nazwa_atrybutu]", True, color)
+        surface.blit(help_text, (50, y_pos + 10))
+        
+        if hero.attribute_points == 0:
+            exit_text = font.render("Wpisz 'exit' aby kontynuować grę.", True, GREEN)
+            surface.blit(exit_text, (50, y_pos + 40))
+            
 
     def handle_command(self, full_command):
         full_command = full_command.strip().lower()
@@ -1165,15 +1410,16 @@ class GameInterface:
             return
             
         if command == "stats":
-            self.game_state = "STATS"
+            self.set_game_state("STATS")
             return
             
         if command == "inventory":
-            self.game_state = "INVENTORY"
+            self.display_inventory()
+            self.set_game_state("INVENTORY")
             return
             
         if command == "map":
-             self.game_state = "EXPLORATION"
+             self.set_game_state("EXPLORATION")
              return
 
         if command == "save":
@@ -1183,6 +1429,8 @@ class GameInterface:
         if command == "load":
             loaded_hero, loaded_world, loaded_log = load_game(self)
             if loaded_hero:
+                 # UWAGA: QuestBoard jest inicjalizowany w __init__ GameInterface, 
+                 # więc nie musi być ładowany z pliku, o ile jego stan dynamiczny jest w hero.current_quests.
                  self.hero = loaded_hero
                  self.world = loaded_world
                  self.log = loaded_log
@@ -1198,7 +1446,11 @@ class GameInterface:
             elif self.game_state == "TOWN":
                  self.set_game_state("EXPLORATION")
                  return
-            elif self.game_state in ["STATS", "INVENTORY"]:
+            elif self.game_state in ["STATS", "INVENTORY", "STAT_ALLOCATION"]:
+                 # Specjalna obsługa w STAT_ALLOCATION
+                 if self.game_state == "STAT_ALLOCATION" and self.hero.attribute_points > 0:
+                      self.add_to_log("Musisz zakończyć przydzielanie punktów (komenda 'done') lub przydzielić pozostałe punkty.")
+                      return
                  self.set_game_state("EXPLORATION")
                  return
             
@@ -1219,23 +1471,26 @@ class GameInterface:
                 self.hero.rest()
 
         elif self.game_state == "TOWN_SHOP":
-            shop = Shop()
+            shop = self.quest_board.shop_instance
             if command == "buy" and args:
                 try:
                     index = int(args[0]) - 1
-                    shop.buy_item(self.hero, index, self)
+                    if shop.buy_item(self.hero, index, self):
+                         shop.display_items(self.hero, self) # Odświeżenie listy po zakupie
                 except (ValueError, IndexError): self.add_to_log("Nieprawidłowy numer przedmiotu.")
                 
         elif self.game_state == "TOWN_BOARD":
-            board = QuestBoard()
+            board = self.quest_board
             if command == "accept" and args:
                 try:
                     index = int(args[0]) - 1
-                    board.accept_quest(self.hero, index, self)
+                    if board.accept_quest(self.hero, index, self):
+                        board.display_board(self.hero, self) # Odświeżenie listy po zaakceptowaniu
                 except (ValueError, IndexError): self.add_to_log("Nieprawidłowy numer zadania.")
             elif command == "claim" and args:
                 quest_name = " ".join(args).replace("'", "").strip()
                 self._claim_quest(quest_name)
+                board.display_board(self.hero, self) # Odświeżenie listy po odebraniu nagrody
                 
         elif self.game_state == "INVENTORY":
              self._handle_inventory_command(command, args)
@@ -1248,7 +1503,7 @@ class GameInterface:
                      self.set_game_state("EXPLORATION")
                      self.add_to_log("Przydzielanie atrybutów zakończone.")
                  else:
-                     self.add_to_log(f"Musisz przydzielić pozostałe {self.hero.attribute_points} punkty lub poczekać do następnego awansu.")
+                     self.add_to_log(f"Musisz przydzielić pozostałe {self.hero.attribute_points} punkty. Użyj 'allocate' lub kontynuuj przy następnym awansie.")
              
         elif self.game_state == "COMBAT":
             self._handle_combat_command(command, args)
@@ -1260,11 +1515,15 @@ class GameInterface:
         if self.game_state == "START_MENU":
              self.add_to_log("Komendy: **new [imie] [klasa] [motyw]**, **load**.")
         elif self.game_state == "EXPLORATION":
-            self.add_to_log("Komendy: **north, south, east, west** (ruch), **stats**, **inventory**, **map**, **save**, **load**, **exit**.")
+            self.add_to_log("Komendy: **WASD** (ruch), **P** (sklep w mieście), **stats**, **inventory**, **map**, **save**, **load**, **exit**.")
         elif self.game_state == "TOWN":
             self.add_to_log("Komendy: **shop**, **board**, **rest**, **exit**.")
+        elif self.game_state == "TOWN_SHOP":
+             self.add_to_log("Komendy: **buy [numer]**, **exit**.")
+        elif self.game_state == "TOWN_BOARD":
+             self.add_to_log("Komendy: **accept [numer]**, **claim [nazwa zadania]**, **exit**.")
         elif self.game_state == "COMBAT":
-             self.add_to_log("Komendy: **attack [nr_wroga]**, **skill [nazwa] [nr_wroga]**, **flee**, **stats**, **skills**.")
+             self.add_to_log("Komendy: **attack [nr_wroga]**, **skill [nazwa] [nr_wroga/lista]**, **flee**, **stats**, **skills**.")
         elif self.game_state == "STAT_ALLOCATION":
              self.add_to_log("Komendy: **allocate STR/DEX/etc.**, **stats**, **done**.")
              
@@ -1278,10 +1537,13 @@ class GameInterface:
                         self._use_potion(item)
                     elif command == "equip" and item.equipable:
                         self.hero.equip_item(item)
+                        # self.display_inventory() # Odświeżenie (już w logu)
                     else:
                         self.add_to_log(f"Nie możesz użyć/wyposażyć {item.name}.")
                 else: self.add_to_log("Błędny numer przedmiotu.")
             except (ValueError, IndexError): self.add_to_log("Nieprawidłowy numer.")
+        elif command == "exit":
+             self.set_game_state("EXPLORATION")
 
     def _use_potion(self, item):
         self.hero.inventory.remove(item)
@@ -1295,16 +1557,18 @@ class GameInterface:
             mana_regen = item.stats['mana']
             self.hero.mana = min(self.hero.mana + mana_regen, self.hero.max_mana)
             self.add_to_log(f"Użyto {item.name}: przywrócono {mana_regen} Many.")
+        self.draw_inventory(MAIN_SECTION_Y_START) # Odświeżenie
 
     def _claim_quest(self, quest_name):
-         for q in self.hero.current_quests:
+         for q in list(self.hero.current_quests): # Używamy kopii do iteracji
              if q.name.lower() == quest_name.lower():
                  if q.completed:
                      result = q.give_reward(self.hero, self)
                      if result == "WIN":
                          self.set_game_state("WIN")
                      else:
-                         self.hero.current_quests.remove(q)
+                         if q in self.hero.current_quests:
+                            self.hero.current_quests.remove(q)
                      return
                  else:
                      self.add_to_log(f"Zadanie '{q.name}' nie jest jeszcze ukończone: {q.progress}/{q.target}.")
@@ -1341,6 +1605,7 @@ class GameInterface:
         
         # Weryfikacja i parsowanie celu
         target_index = None
+        target_indices = []
         skill_name = None
         
         if command == "attack" and args and args[-1].isdigit():
@@ -1351,38 +1616,64 @@ class GameInterface:
                  self.add_to_log("Użycie: skill [nazwa_umiejętności] [numer_wroga] lub skill [nazwa_umiejętności] (dla umiejętności własnych)")
                  return
                  
-            # Próba parsowania numeru wroga na końcu (zmieniono na parsowanie po podłodze)
-            if args[-1].isdigit():
-                 try: target_index = int(args[-1]) - 1
-                 except ValueError: pass
-                 skill_parts = args[:-1] if target_index is not None else args
-            else:
-                 skill_parts = args
-                 
+            skill_parts = []
+            target_parts = []
+            
+            # Oddzielanie nazwy umiejętności od celów (np. "magic storm 1,2,3" lub "magic_storm 1 2 3")
+            target_start_index = len(args)
+            for i, arg in enumerate(args):
+                 if any(c.isdigit() for c in arg):
+                      target_start_index = i
+                      break
+            
+            skill_parts = args[:target_start_index]
+            target_parts = args[target_start_index:]
+            
+            # Parsowanie celów (obsługuje 1,2,3 lub 1 2 3)
+            for part in target_parts:
+                 for num in part.split(','):
+                     if num.isdigit():
+                         target_indices.append(int(num) - 1)
+            
             # Konwersja komendy na nazwę umiejętności (np. "shatter defense" -> "Shatter Defense")
             skill_name = "_".join(skill_parts).title().replace('_', ' ')
             
-            # Wymuszenie celowania dla Taunt
-            if skill_name == "Taunt" and target_index is None:
-                 self.add_to_log(f"Umiejętność {skill_name} wymaga wyboru celu! Komenda: skill taunt [nr].")
-                 return
+            # --- Weryfikacja celów ---
+            
+            # Umiejętności wspierające (bez celu)
+            if skill_name in ["Heal", "Block", "Mana Shield", "Vanish", "Rage", "Teleport", "Shadow Step"]:
+                 if target_indices:
+                     self.add_to_log(f"Umiejętność {skill_name} nie wymaga celu.")
+                     return
+                 target_enemy = None
+                 
+            # Umiejętności obszarowe (Magic Storm)
+            elif skill_name == "Magic Storm":
+                 if not target_indices:
+                     self.add_to_log(f"Umiejętność {skill_name} wymaga listy celów: skill magic_storm 1 2.")
+                     return
+                 # Weryfikacja, czy wszystkie cele są poprawne
+                 for index in target_indices:
+                     if not (0 <= index < len(alive_enemies) and alive_enemies[index].is_alive()):
+                          self.add_to_log(f"Nieprawidłowy lub nieżywy cel: {index + 1}.")
+                          return
+                 target_enemy = None # Atak na listę
+                 
+            # Umiejętności celujące (reszta)
+            else:
+                 if not target_indices or len(target_indices) != 1:
+                      self.add_to_log(f"Umiejętność {skill_name} wymaga dokładnie jednego celu: skill {skill_name.lower().replace(' ', '_')} [nr].")
+                      return
+                 target_index = target_indices[0]
+                 if not (0 <= target_index < len(alive_enemies) and alive_enemies[target_index].is_alive()):
+                     self.add_to_log("Nieprawidłowy lub nieżywy cel.")
+                     return
+                 target_enemy = alive_enemies[target_index]
                  
             # Sprawdzenie czy umiejętność jest w ogóle znana
             if skill_name not in self.hero.skills:
                  self.add_to_log(f"Nieznana umiejętność: {skill_name}. Sprawdź pisownię w komendzie 'skills'.")
                  return
-                 
-            # Weryfikacja celu dla umiejętności atakujących/debuffujących
-            if skill_name not in ["Heal", "Block", "Mana Shield", "Vanish"] and target_index is None:
-                 self.add_to_log(f"Umiejętność {skill_name} wymaga wyboru celu! Komenda: skill {skill_name.lower().replace(' ', '_')} [nr].")
-                 return
-            
-            # Upewnienie się, że cel jest żywy i poprawny
-            if target_index is not None and not (0 <= target_index < len(alive_enemies) and alive_enemies[target_index].is_alive()):
-                 self.add_to_log("Nieprawidłowy lub nieżywy cel.")
-                 return
-            
-        target_enemy = alive_enemies[target_index] if target_index is not None else None
         
         # --- Tura bohatera ---
         damage_dealt = 0
@@ -1390,9 +1681,11 @@ class GameInterface:
         additional_effect = None
 
         if command == "attack":
-            if target_enemy is None: 
+            if target_index is None: 
                  self.add_to_log("Wybierz cel ataku: attack [numer wroga].")
                  return
+            
+            target_enemy = alive_enemies[target_index]
             self.selected_skill = ("attack", target_index + 1)
             damage_dealt = self.hero.attack_basic(target_enemy.get_current_AC())
             self.add_to_log(f"Atak podstawowy na {target_enemy.name}: Zadano {damage_dealt} obrażeń.")
@@ -1400,10 +1693,18 @@ class GameInterface:
         elif command == "skill":
             self.selected_skill = (skill_name, target_index + 1 if target_index is not None else 0)
             
-            damage_dealt, status_applied, additional_effect = self.hero.use_skill(skill_name, target_enemy)
+            # Obsługa Magic Storm (lista celów)
+            if skill_name == "Magic Storm":
+                 # Przekazujemy listę obiektów wroga
+                 targets = [alive_enemies[i] for i in target_indices]
+                 damage_dealt, status_applied, additional_effect = self.hero.use_skill(skill_name, target_list=targets)
+            else:
+                 damage_dealt, status_applied, additional_effect = self.hero.use_skill(skill_name, target_enemy)
             
-            if damage_dealt == -1: # Zdolność wspierająca (np. Heal, Block, Mana Shield, Taunt, Vanish)
+            if damage_dealt == -1: # Zdolność wspierająca (Heal, Block, Mana Shield, Taunt, Vanish, Rage, Teleport, Shadow Step)
                 pass
+            elif damage_dealt == -2: # Atak obszarowy
+                 pass
             elif damage_dealt == 0:
                 self.add_to_log(f"Umiejętność {skill_name}: **Pudło!**")
             else:
@@ -1412,9 +1713,15 @@ class GameInterface:
              self.add_to_log("Nieznana komenda w walce.")
              return
              
-        # Obsługa obrażeń i statusów
+        # Obsługa obrażeń i statusów (tylko dla pojedynczego celu)
         if target_enemy and damage_dealt > 0:
             target_enemy.take_damage(damage_dealt)
+            
+            if additional_effect == "HEAL_DMG_PERCENT_50":
+                 heal_amount = int(damage_dealt * 0.5)
+                 self.hero.hp = min(self.hero.hp + heal_amount, self.hero.max_hp)
+                 self.add_to_log(f"**Vampiric Strike**: Uleczono się za {heal_amount} HP.")
+                 
         if target_enemy and status_applied:
             target_enemy.apply_status(status_applied)
             
@@ -1437,8 +1744,6 @@ class GameInterface:
         
         self.add_to_log("\n*** Tura Wroga ***")
         
-        # Wrogowie sprowokowani
-        taunted_enemies = [e for e in self.current_enemies if e.is_alive() and "Taunt" in e.status_effects]
         
         for i, enemy in enumerate(self.current_enemies):
             if enemy.is_alive():
@@ -1448,9 +1753,6 @@ class GameInterface:
                  
                  if "Stun" in enemy.status_effects: continue # Ogłuszony, traci turę
                  
-                 # Logika celu (Taunt)
-                 # Ponieważ Taunt jest na bohaterze, to cel jest zawsze bohater.
-                 
                  dmg = enemy.attack(self.hero)
                  if dmg > 0:
                      self.add_to_log(f"{enemy.name} atakuje! Bohater traci {dmg} HP. Pozostało: {self.hero.hp}.")
@@ -1459,6 +1761,12 @@ class GameInterface:
                      self.add_to_log("\n*** BOHATER ZGINĄŁ! KONIEC GRY! ***")
                      self.set_game_state("DEFEAT")
                      break # Przerwij pętlę wrogów
+                     
+        # Po turze wroga, jeśli był aktywny Teleport, to efekt mija
+        if "Teleporting" in self.hero.status_effects:
+             del self.hero.status_effects["Teleporting"]
+             self.add_to_log("Status **Teleporting** minął.")
+
 
     def draw_start_menu(self):
         menu_text = "*** Advanced D&D Text RPG (Pygame Edition) ***\n"
@@ -1498,13 +1806,17 @@ def save_game(hero, world, interface):
 
 def load_game(interface):
     try:
+        if not os.path.exists(SAVE_FILE):
+             interface.add_to_log("Błąd ładowania: Plik zapisu nie istnieje.")
+             return None, None, None
+             
         with open(SAVE_FILE, 'r') as f:
             data = json.load(f)
             
-        interface.add_to_log(f"Gra załadowana pomyślnie z {SAVE_FILE}.")
         
         # 1. Tworzenie Świata
         world_data = data['world']
+        # Używamy rozmiaru i tematu z pliku zapisu
         new_world = World(size=world_data['size'], theme=world_data['theme_name'])
         new_world.map = world_data['map']
         new_world.hero_position = tuple(world_data['hero_position'])
@@ -1512,6 +1824,7 @@ def load_game(interface):
         # 2. Tworzenie Bohatera
         hero_data = data['hero']
         # Tworzymy nowego bohatera, aby zainicjalizować bazowe statystyki i umiejętności
+        # Następnie nadpisujemy stanem z pliku
         new_hero = Hero(hero_data['name'], hero_data['hero_class']) 
         
         # Przywracanie statystyk i ekwipunku
@@ -1520,7 +1833,7 @@ def load_game(interface):
         new_hero.mana = hero_data['mana']; new_hero.max_mana = hero_data['max_mana']
         new_hero.gold = hero_data['gold']; new_hero.exp = hero_data['exp']
         new_hero.level = hero_data['level']; new_hero.attribute_points = hero_data['attribute_points']
-        new_hero.skills = hero_data['skills'] # Upewnienie się, że ma zaktualizowane skille
+        new_hero.skills = hero_data['skills'] 
         
         new_hero.inventory = [create_item_from_dict(d) for d in hero_data['inventory']]
         
@@ -1530,8 +1843,12 @@ def load_game(interface):
         new_hero.equipped_ring = create_item_from_dict(hero_data.get('equipped_ring'))
         new_hero.equipped_amulet = create_item_from_dict(hero_data.get('equipped_amulet'))
         
+        # Upewnienie się, że statystyki są przeliczone
+        new_hero._update_derived_stats()
+        
         new_hero.status_effects = {k: StatusEffect.from_dict(v) for k, v in hero_data['status_effects'].items()}
         new_hero.current_quests = [create_quest_from_dict(q) for q in hero_data['current_quests']]
+        new_hero.is_shadow_stepping = hero_data.get('is_shadow_stepping', False)
         
         # Ponowne obliczenie statystyk pochodnych
         new_hero._update_derived_stats() 
@@ -1539,12 +1856,14 @@ def load_game(interface):
         # 3. Przywracanie Logu
         new_log = data['log']
         
-        # 4. Ustawienie Stanu Gry
-        new_game_state = data.get('game_state', 'EXPLORATION')
+        # 4. Ustawienie Stanu Gry (Stan gry zostanie ustawiony w run_game, po podmianie obiektów)
+        
+        interface.add_to_log(f"Gra załadowana pomyślnie z {SAVE_FILE}.")
         
         return new_hero, new_world, new_log
 
     except FileNotFoundError:
+        # Ten błąd powinien być już obsłużony przez os.path.exists
         interface.add_to_log("Błąd ładowania: Plik zapisu nie istnieje.")
         return None, None, None
     except Exception as e:
@@ -1596,9 +1915,11 @@ def run_game():
                          elif parts[0].lower() == "load":
                              loaded_hero, loaded_world, loaded_log = load_game(current_game)
                              if loaded_hero:
+                                 # Zastąpienie instancji gry załadowanymi danymi
                                  current_game = GameInterface(loaded_hero, loaded_world)
                                  current_game.log = loaded_log
-                                 current_game.set_game_state("EXPLORATION")
+                                 # Ustawienie stanu gry na podstawie zapisu
+                                 current_game.set_game_state(data.get('game_state', 'EXPLORATION')) # Używamy stanu z pliku (jeśli jest)
                                  current_game.add_to_log("Wczytano zapis gry. Witaj z powrotem!")
                              else:
                                   current_game.add_to_log("Nie udało się wczytać gry.")
@@ -1625,6 +1946,9 @@ def run_game():
                      elif event.key == pygame.K_s: current_game.handle_command("south")
                      elif event.key == pygame.K_a: current_game.handle_command("west")
                      elif event.key == pygame.K_d: current_game.handle_command("east")
+                     elif event.key == pygame.K_p: # Skrót do sklepu
+                         if current_game.world.get_current_location() == "town":
+                             current_game.handle_command("shop")
 
 
         # --- Rysowanie ---
